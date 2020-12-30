@@ -12,7 +12,7 @@
 * 杜邦线
 * 面包板
 ## 硬件程序框架
-![在这里插入图片描述](https://img-blog.csdnimg.cn/20201230183740316.png)
+![硬件程序框架](./image/framework.png)
 ## 主要功能
 * WIFI配网：ESP32可以作为服务器提供配网页面实现配网
 * 天气API获取：ESP32发送HTTP请求，使用ArduinoJSON处理数据
