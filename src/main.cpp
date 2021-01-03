@@ -558,7 +558,7 @@ void ThreadSensorEntry(void *pvParameters)
     params["temperature"] = bme.readTemperature();                    //BEM280温度
     doc["method"] = POST_PROPERY;                                     //消息的方法(根据阿里云Alinker协议)
     serializeJson(doc, payload);                                      //封装JSON数据并且放入payload里面
-    Serial.println(payload);                                          //串口查看
+    // Serial.println(payload);                                          //串口查看
     mqttClient.publish(PROPERTY_POST_TOPIC.c_str(), payload.c_str()); //向阿里云进行属性数据上报
     vTaskDelay(pdMS_TO_TICKS(3000));
   }
@@ -877,8 +877,8 @@ void wifi_connect()
   Blinker.begin(auth.c_str(), SSID.c_str(), PASSWORD.c_str());
   //判断连接状态
   int count = 0;
-  // while (WiFi.status() != WL_CONNECTED)
-  while(!Blinker.connected())
+  while (WiFi.status() != WL_CONNECTED)
+  // while(!Blinker.connected())
   {
     //vTaskDelay(pdMS_TO_TICKS(1000));
     delay(1000);
@@ -1051,15 +1051,17 @@ void webwifi()
 void callback(char *topics, byte *payload, unsigned int length)
 {
   String topic = topics; //Stirng方便处理
+  String temp; //存放消息
   /**打印消息**/
-  // Serial.print("Message arrived [");
-  // Serial.print(topics);
-  // Serial.print("] ");
+  Serial.print("Message arrived [");
+  Serial.print(topics);
+  Serial.print("] ");
   for (int i = 0; i < length; i++)
   {
     // Serial.print((char)payload[i]);
+    temp += (char)payload[i]; 
   }
-  Serial.println();
+  Serial.println(temp);
 
   /**对消息进行处理,用户自己完成**/
   /**===================== Example ====================**/
