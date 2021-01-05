@@ -52,7 +52,6 @@
 #include <Adafruit_BME280.h>
 #include <SPI.h>
 #include <Wire.h>
-#include <DHT.h>
 #include <AsyncUDP.h>
 #include <WiFiUdp.h>
 #define BLINKER_WIFI
@@ -71,11 +70,11 @@ WiFiClient espClient;               // WiFiClient : 创建wifi 客户端对象,�
 HTTPClient espHttp;                 // HTTP : HTTP请求
 AsyncWebServer server(80);          // server : Web配网服务器
 PubSubClient mqttClient(espClient); // PubSubClient 创建mqtt 客户端对象,用于接入MQTT
+PubSubClient mClient(espClient); // PubSubClient 创建mqtt 客户端对象,用于接入MQTT
 File file;                          // File : 文件句柄
 StaticJsonDocument<20000> doc;      // jSON数据处理
 //Adafruit_BMP280 bmp(SS);           // bmp280
 Adafruit_BME280 bme(SS);                                                                      // bme280
-DHT dht11(DHTPIN, DHT11);                                                                     // DHT11
 int httpResponseCode;                                                                         // http响应状态
 String httpBaseURL = "http://47.95.249.141:1880";                                             // http访问的地址
 String serverBath = "https://tianqiapi.com/api?version=v6&appid=29776943&appsecret=GtjmmR3Y"; //天气API地址
@@ -203,7 +202,6 @@ TaskHandle_t ThreadMQTT;    //MQTT线程
 TaskHandle_t ThreadSensor;  //Sensor线程
 TaskHandle_t ThreadWeather; //Weather线程
 TaskHandle_t ThreadOled;    //OLED线程
-TaskHandle_t ThreadIDLE;    //空闲线程
 
 /*定义定时器句柄*/
 TimerHandle_t TimeAlarmLED;
@@ -221,7 +219,6 @@ void ThreadMqttEntry(void *pvParameters);    //MQTT线程入口
 void ThreadSensorEntry(void *pvParameters);  //Sensor线程入口
 void ThreadWeatherEntry(void *pvParameters); //HTTP线程入口
 void ThreadOledEntry(void *pvParameters);    //OLED线程入口
-void ThreadIdleEntry(void *pvParameters);    //空闲线程入口
 
 /*定时器入口声明*/
 void TIMAlarmLEDEntry(TimerHandle_t xTimer); //LED警告定时器入口
@@ -265,10 +262,10 @@ const unsigned char col[] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0
 void setup()
 {
   Serial.begin(115200); //设置串口波特率
+  pinMode(LED, OUTPUT); //电源、WIFI连接状态指示灯
   /*====================用户初始化=======================*/
   /**如 IO口模式初始化**/
-  pinMode(LED, OUTPUT);
-
+  
   /*====================用户初始化=======================*/
   OLEDInit();     //OLED初始化
   FileSystem();   //文件系统创建
@@ -348,7 +345,7 @@ void TaskAPPStart()
   status = xTaskCreatePinnedToCore(
       (TaskFunction_t)ThreadWiFiEntry,   //WIFI线程入口
       (const char *const) "Thread_WIFI", //线程名称
-      (const uint32_t)2048,              //线程栈
+      (const uint32_t)2048 * 2,              //线程栈
       (void *const)NULL,                 //WIFI线程入口参数
       (UBaseType_t)15,                   //线程优先级 0-24 数值越大优先级越高
       (TaskHandle_t *)&ThreadWiFi,       //线程句柄
@@ -382,7 +379,7 @@ void TaskAPPStart()
   status = xTaskCreatePinnedToCore(
       (TaskFunction_t)ThreadSensorEntry,   //Sensor线程入口
       (const char *const) "Thread_Sensor", //线程名称
-      (const uint32_t)2048,                //线程栈
+      (const uint32_t)2048 * 2,                //线程栈
       (void *const)NULL,                   //Sensor线程入口参数
       (UBaseType_t)10,                     //线程优先级 0-24 数值越大优先级越高
       (TaskHandle_t *)&ThreadSensor,       //线程句柄
@@ -430,16 +427,6 @@ void TaskAPPStart()
     Serial.println("Oled线程创建失败...");
   }
 
-  /*创建空闲线程*/
-  xTaskCreatePinnedToCore(
-      (TaskFunction_t)ThreadIdleEntry,   //IDLE线程入口
-      (const char *const) "Thread_IDLE", //线程名称
-      (const uint32_t)1024,              //线程栈
-      (void *const)NULL,                 //IDLE线程入口参数
-      (UBaseType_t)1,                    //线程优先级 0-24 数值越大优先级越高
-      (TaskHandle_t *)&ThreadIDLE,       //线程句柄
-      (const BaseType_t)PRO_CPU_NUM);    //指定内核0
-
   /*连接网络提示定时器*/
   TimeAlarmLED = xTimerCreate(
       "TIM_Alarm_LED",    //定时器名称
@@ -467,7 +454,6 @@ void ThreadWiFiEntry(void *pvParameters)
   xSemaphoreTake(sem_WIFI, portMAX_DELAY);
   /*删除主线程*/
   //vTaskDelete(ThreadMain);
-
   Serial.println("===WiFi连接任务启动===");
   wifi_connect(); //wifi连接
   while (1)
@@ -487,7 +473,6 @@ void ThreadMqttEntry(void *pvParameters)
   /*无限等待MQTT信号量*/
   xSemaphoreTake(sem_MQTT, portMAX_DELAY);
   /*挂起WIFI线程*/
-  //vTaskSuspend(ThreadWiFi);
   Serial.println("===MQTT连接任务启动===");
   /*根据宏定义,判别 Aliyun 或  私有云 */
 #ifdef Aliyun_IoT
@@ -495,15 +480,13 @@ void ThreadMqttEntry(void *pvParameters)
 #else
   mqtt_connect(); //mqtt连接
 #endif
-  /**/
-  //vTaskResume(ThreadWiFi);
-  // vTaskDelete(ThreadWiFi);
+
   while (1)
   {
     if (!mqttClient.connected() || !WiFi.isConnected())
     {
       /*检验MQTT和WIFI是否断连,断连芯片重启重新配网*/
-      vTaskSuspendAll();
+      
       u8g2.clearBuffer();
       Serial.println("WIFI or MQTT has been disconnected");
       OLEDprint(20, 32, "WIFI or MQTT");
@@ -517,7 +500,7 @@ void ThreadMqttEntry(void *pvParameters)
     }
     mqttClient.loop(); //MQTT客户端保活
     Blinker.run();     //Blinker客户端保活
-    vTaskDelay(pdMS_TO_TICKS(10));
+    vTaskDelay(pdMS_TO_TICKS(20));
   }
 }
 
@@ -537,27 +520,27 @@ void ThreadSensorEntry(void *pvParameters)
     humidity_bme = bme.readHumidity();
     pressure_bme = bme.readPressure();
 
-    if(analogRead(34) > 1000)
+    if (analogRead(34) > 2000)
     {
-      digitalWrite(Bee,HIGH);
+      digitalWrite(Bee, LOW);
     }
     else
     {
-      digitalWrite(Bee,LOW);
+      digitalWrite(Bee, HIGH);
     }
     String payload; //存放MQTT发送消息的变量
     doc.clear();    //清空原有存放JSON数据和释放内存
     /* Aliyun消息体格式 */
-    doc["id"] = esp_random();                                         //每个消息都有自己的ID
-    doc["version"] = "1.0";                                           //消息的版本
-    JsonObject params = doc.createNestedObject("params");             //JSON数据套娃
-    params["carbon"] = analogRead(34);                                //烟雾浓度
-    params["humidity"] = bme.readHumidity();                          //BME280湿度
-    params["altitude"] = bme.readAltitude(1013.0);                    //BME280高度(需要设置当前海平面高度)
-    params["airPressure"] = bme.readPressure() / 100.0;               //BME280气压
-    params["temperature"] = bme.readTemperature();                    //BEM280温度
-    doc["method"] = POST_PROPERY;                                     //消息的方法(根据阿里云Alinker协议)
-    serializeJson(doc, payload);                                      //封装JSON数据并且放入payload里面
+    doc["id"] = esp_random();                             //每个消息都有自己的ID
+    doc["version"] = "1.0";                               //消息的版本
+    JsonObject params = doc.createNestedObject("params"); //JSON数据套娃
+    params["carbon"] = analogRead(34);                    //烟雾浓度
+    params["humidity"] = bme.readHumidity();              //BME280湿度
+    params["altitude"] = bme.readAltitude(1013.0);        //BME280高度(需要设置当前海平面高度)
+    params["airPressure"] = bme.readPressure() / 100.0;   //BME280气压
+    params["temperature"] = bme.readTemperature();        //BEM280温度
+    doc["method"] = POST_PROPERY;                         //消息的方法(根据阿里云Alinker协议)
+    serializeJson(doc, payload);                          //封装JSON数据并且放入payload里面
     // Serial.println(payload);                                          //串口查看
     mqttClient.publish(PROPERTY_POST_TOPIC.c_str(), payload.c_str()); //向阿里云进行属性数据上报
     vTaskDelay(pdMS_TO_TICKS(3000));
@@ -575,11 +558,12 @@ void ThreadWeatherEntry(void *pvParameters)
 
   while (1)
   {
+
     /*GET请求*/
     //Serial.println("===================== GET =====================");
     // espHttp.begin(httpBaseURL + "/get");
-    espHttp.begin(serverBath);
-    // espHttp.begin("http://47.95.249.141:1880/api/test");
+    // espHttp.begin(serverBath);
+    espHttp.begin("http://47.95.249.141:1880/api/test");
     httpResponseCode = espHttp.GET();
     if (httpResponseCode > 0)
     {
@@ -602,70 +586,70 @@ void ThreadWeatherEntry(void *pvParameters)
       air_level = doc["air_level"];
       String time = doc["date"];
       date = time;
-      vTaskDelay(pdMS_TO_TICKS(1000));
-      //打印测试
-      // Serial.println("-------API获取数据打印------");
-      // Serial.print("日期："); // "日期：2020-12-21"
-      // Serial.println(date);
-      // Serial.print("星期："); // "星期：星期一"
-      // Serial.println(week);
-      // Serial.print("所在城市："); // "所在城市：杭州"
-      // Serial.println(city);
-      // Serial.print("天气："); // "天气：晴"
-      // Serial.println(wea);
-      // Serial.print("天气标志："); // "天气：晴"
-      // Serial.println(wea_img);
-      // Serial.print("当前气温："); // "当前气温：9"
-      // Serial.println(tem);
-      // Serial.print("最高温："); // "最高温：8"
-      // Serial.println(tem1);
-      // Serial.print("最低温："); // "最低温：0"
-      // Serial.println(tem2);
-      // Serial.print("当前湿度："); // "当前湿度：32%"
-      // Serial.println(humidity);
-      // Serial.print("当前气压："); // "当前气压：1023"
-      // Serial.println(pressure);
-      // Serial.print("风向："); // "风向：东风"
-      // Serial.println(win);
-      // Serial.print("风速："); // "风速：2级"
-      // Serial.println(win_speed);
-      // Serial.print("PM2.5浓度："); // "PM2.5浓度：80"
-      // Serial.println(air_pm25);
-      // Serial.print("空气质量："); // "空气质量：良"
-      // Serial.println(air_level);
-      // Serial.println("-------------  -------------");
-      // Serial.println("");
       espHttp.end();
     }
+    //打印测试
+    // Serial.println("-------API获取数据打印------");
+    // Serial.print("日期："); // "日期：2020-12-21"
+    // Serial.println(date);
+    // Serial.print("星期："); // "星期：星期一"
+    // Serial.println(week);
+    // Serial.print("所在城市："); // "所在城市：杭州"
+    // Serial.println(city);
+    // Serial.print("天气："); // "天气：晴"
+    // Serial.println(wea);
+    // Serial.print("天气标志："); // "天气：晴"
+    // Serial.println(wea_img);
+    // Serial.print("当前气温："); // "当前气温：9"
+    // Serial.println(tem);
+    // Serial.print("最高温："); // "最高温：8"
+    // Serial.println(tem1);
+    // Serial.print("最低温："); // "最低温：0"
+    // Serial.println(tem2);
+    // Serial.print("当前湿度："); // "当前湿度：32%"
+    // Serial.println(humidity);
+    // Serial.print("当前气压："); // "当前气压：1023"
+    // Serial.println(pressure);
+    // Serial.print("风向："); // "风向：东风"
+    // Serial.println(win);
+    // Serial.print("风速："); // "风速：2级"
+    // Serial.println(win_speed);
+    // Serial.print("PM2.5浓度："); // "PM2.5浓度：80"
+    // Serial.println(air_pm25);
+    // Serial.print("空气质量："); // "空气质量：良"
+    // Serial.println(air_level);
+    // Serial.println("-------------  -------------");
+    // Serial.println("");
+
     //Serial.println("===================== GET =====================");
     /*POST请求*/
     // Serial.println("===================== POST =====================");
     //espHttp.begin(httpBaseURL + "/sensor?");
     //espHttp.begin("http://192.168.1.158:8888/v1/info");
-    espHttp.begin("http://47.95.249.141:1880/sensor");
+
+    espHttp.begin("http://47.95.249.141:1880/api/test");
     espHttp.addHeader("Content-Type", "application/json");
     doc.clear();
     doc["stuNum"] = "31902342";
-    doc["temperature"] = bme.readTemperature();
-    doc["humidity"] = bme.readHumidity();
+    doc["temperature"] = (int)bme.readTemperature();
+    doc["humidity"] = (int)bme.readHumidity();
     doc["airpressure"] = bme.readPressure() / 100.0;
     String params;
     serializeJson(doc, params);
-    espHttp.addHeader("Content-Type", "application/json");
-    httpResponseCode = espHttp.POST(params);
-    // Serial.println(params);
-    // espHttp.addHeader("Content-Type", "application/x-www-form-urlencoded");
-    //httpResponseCode = espHttp.POST("api_key=tPmAT5Ab3j7F9&sensor=BME280&value1=24.25&value2=49.54&value3=1005.14");
 
-    //espHttp.addHeader("Content-Type", "application/json");
-    //httpResponseCode = espHttp.POST("{\"api_key\":\"tPmAT5Ab3j7F9\",\"sensor\":\"BME280\",\"value1\":\"24.25\",\"value2\":\"49.54\",\"value3\":\"1005.14\"}");
+    httpResponseCode = espHttp.POST(params);
+
     if (httpResponseCode > 0)
     {
+      Serial.println("***********POST**********");
+      // Serial.println(httpResponseCode);
       Serial.println(espHttp.getString());
+      Serial.println("***********POST*********");
     }
     espHttp.end();
+    
     // Serial.println("===================== POST =====================");
-    vTaskDelay(pdMS_TO_TICKS(1000 * 60 * 60));
+    vTaskDelay(pdMS_TO_TICKS(3000));
   }
 }
 
@@ -799,21 +783,6 @@ void ThreadOledEntry(void *pvParameters)
     u8g2.sendBuffer(); //绘制缓冲区内容
 
     vTaskDelay(pdMS_TO_TICKS(3000));
-  }
-}
-
-/*
- * @brief:空闲线程入口
- * @param:none
- * @retval:none
-*/
-void ThreadIdleEntry(void *pvParameters)
-{
-  while (1)
-  {
-    //Serial.println("This is idel thread , nothing to do ...");
-
-    vTaskDelay(pdMS_TO_TICKS(5000));
   }
 }
 
@@ -1051,7 +1020,7 @@ void webwifi()
 void callback(char *topics, byte *payload, unsigned int length)
 {
   String topic = topics; //Stirng方便处理
-  String temp; //存放消息
+  String temp;           //存放消息
   /**打印消息**/
   Serial.print("Message arrived [");
   Serial.print(topics);
@@ -1059,7 +1028,7 @@ void callback(char *topics, byte *payload, unsigned int length)
   for (int i = 0; i < length; i++)
   {
     // Serial.print((char)payload[i]);
-    temp += (char)payload[i]; 
+    temp += (char)payload[i];
   }
   Serial.println(temp);
 
@@ -1160,7 +1129,7 @@ void AliyunIoT(String productKey, String deviceName, String deviceSecret)
     /* 订阅云端设备属性设置 */
     mqttClient.subscribe(ONSET_PROPS_TOPIC.c_str(), 0);
 
-    /*O*/  
+    /*O*/
     Serial.println("Aliyun_IoT is connected");
     Serial.println("MQTT is connected");
     OLEDprint(0, 62, "Aliyun is connecting ...");
@@ -1168,7 +1137,7 @@ void AliyunIoT(String productKey, String deviceName, String deviceSecret)
     OLEDprint(0, 62, "Aliyun connected");
     u8g2.sendBuffer();
     delay(1500);
-    
+
     /* WIFI,MQTT 均连上之后 发送信号量 */
     xSemaphoreGive(sem_Sensor); //触发Sensor 传感器线程
     xSemaphoreGive(sem_HTTP);   //触发HTTP weather线程
@@ -1250,8 +1219,10 @@ void mqtt_connect()
     * retained ：保留消息 true or false
     */
     mqttClient.publish("/test", "... this is a test of mqtt ...", false);
-    xSemaphoreGive(sem_Sensor);
-    xSemaphoreGive(sem_HTTP);
+    /* WIFI,MQTT 均连上之后 发送信号量 */
+    xSemaphoreGive(sem_Sensor); //触发Sensor 传感器线程
+    xSemaphoreGive(sem_HTTP);   //触发HTTP weather线程
+    xSemaphoreGive(sem_Oled);   //触发OLED weather线程
   }
 }
 #endif
@@ -1355,7 +1326,8 @@ void SensorInit()
 
   int count = 0;
   /*蜂鸣器*/
-  pinMode(Bee,OUTPUT);  
+  pinMode(Bee, OUTPUT);
+  digitalWrite(Bee,HIGH);
   /*bme280初始化*/
   while (!bme.begin())
   {
@@ -1367,29 +1339,28 @@ void SensorInit()
     count++;
     delay(500);
   }
-  dht11.begin();
 }
 
 /*======================================== Blinker =========================================*/
-void miotPowerState(const String &state)
-{
-  BLINKER_LOG("need set power state: ", state);
+// void miotPowerState(const String &state)
+// {
+//   BLINKER_LOG("need set power state: ", state);
 
-  if (state == BLINKER_CMD_ON)
-  {
-    digitalWrite(LED, HIGH);
+//   if (state == BLINKER_CMD_ON)
+//   {
+//     digitalWrite(LED, HIGH);
 
-    BlinkerMIOT.powerState("on");
-    BlinkerMIOT.print();
-  }
-  else if (state == BLINKER_CMD_OFF)
-  {
-    digitalWrite(LED, LOW);
+//     BlinkerMIOT.powerState("on");
+//     BlinkerMIOT.print();
+//   }
+//   else if (state == BLINKER_CMD_OFF)
+//   {
+//     digitalWrite(LED, LOW);
 
-    BlinkerMIOT.powerState("off");
-    BlinkerMIOT.print();
-  }
-}
+//     BlinkerMIOT.powerState("off");
+//     BlinkerMIOT.print();
+//   }
+// }
 
 /*
  * @brief:Blinker 初始化
@@ -1417,9 +1388,9 @@ void miotQuery(int32_t queryCode)
   {
   case BLINKER_CMD_QUERY_ALL_NUMBER:
     BLINKER_LOG("MIOT Query All");
-    BlinkerMIOT.temp(temperature_bme); //小米小爱温度
-    BlinkerMIOT.humi(humidity_bme);    //小米小爱湿度
-    BlinkerMIOT.pm25(air_pm25);        //小米小爱PM2.5浓度
+    BlinkerMIOT.temp((int)temperature_bme); //小米小爱温度
+    BlinkerMIOT.humi((int)humidity_bme);    //小米小爱湿度
+    BlinkerMIOT.pm25(air_pm25);             //小米小爱PM2.5浓度
     BlinkerMIOT.co2(analogRead(34));
     BlinkerMIOT.print();
     break;
