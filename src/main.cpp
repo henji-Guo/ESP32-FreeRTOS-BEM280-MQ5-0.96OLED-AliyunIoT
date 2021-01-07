@@ -60,20 +60,19 @@
 
 // #include <Update.h>
 /*=========================== 全局变量及宏定义 =============================*/
-#define port 1883                   // port : 端口 通常 1883 不需要改
-#define DHTPIN 0                    // DHTPIN : dht11 data pin
-String auth = "93b906890a38";       // Blinker 密钥
-String SSID = "heartbeats";         // ssid : WIFI名称
-String PASSWORD = "24682468";       // password : WIFI密码
-String content;                     // content : Web配网存放HTML页面
-WiFiClient espClient;               // WiFiClient : 创建wifi 客户端对象,用于接入WIFI
-HTTPClient espHttp;                 // HTTP : HTTP请求
-AsyncWebServer server(80);          // server : Web配网服务器
-PubSubClient mqttClient(espClient); // PubSubClient 创建mqtt 客户端对象,用于接入MQTT
-PubSubClient mClient(espClient); // PubSubClient 创建mqtt 客户端对象,用于接入MQTT
-File file;                          // File : 文件句柄
-StaticJsonDocument<20000> doc;      // jSON数据处理
-//Adafruit_BMP280 bmp(SS);           // bmp280
+#define port 1883                                                                             // port : 端口 通常 1883 不需要改
+#define DHTPIN 0                                                                              // DHTPIN : dht11 data pin
+String auth = "93b906890a38";                                                                 // Blinker 密钥
+String SSID = "heartbeats";                                                                   // ssid : WIFI名称
+String PASSWORD = "24682468";                                                                 // password : WIFI密码
+String content;                                                                               // content : Web配网存放HTML页面
+WiFiClient espClient;                                                                         // WiFiClient : 创建wifi 客户端对象,用于接入WIFI
+HTTPClient espHttp;                                                                           // HTTP : HTTP请求
+AsyncWebServer server(80);                                                                    // server : Web配网服务器
+PubSubClient mqttClient(espClient);                                                           // PubSubClient 创建mqtt 客户端对象,用于接入MQTT
+PubSubClient mClient(espClient);                                                              // PubSubClient 创建mqtt 客户端对象,用于接入MQTT
+File file;                                                                                    // File : 文件句柄
+StaticJsonDocument<20000> doc;                                                                // jSON数据处理
 Adafruit_BME280 bme(SS);                                                                      // bme280
 int httpResponseCode;                                                                         // http响应状态
 String httpBaseURL = "http://47.95.249.141:1880";                                             // http访问的地址
@@ -263,9 +262,12 @@ void setup()
 {
   Serial.begin(115200); //设置串口波特率
   pinMode(LED, OUTPUT); //电源、WIFI连接状态指示灯
+    /*蜂鸣器*/
+  pinMode(Bee, OUTPUT);
+  digitalWrite(Bee, HIGH);
   /*====================用户初始化=======================*/
   /**如 IO口模式初始化**/
-  
+
   /*====================用户初始化=======================*/
   OLEDInit();     //OLED初始化
   FileSystem();   //文件系统创建
@@ -345,7 +347,7 @@ void TaskAPPStart()
   status = xTaskCreatePinnedToCore(
       (TaskFunction_t)ThreadWiFiEntry,   //WIFI线程入口
       (const char *const) "Thread_WIFI", //线程名称
-      (const uint32_t)2048 * 2,              //线程栈
+      (const uint32_t)2048 * 2,          //线程栈
       (void *const)NULL,                 //WIFI线程入口参数
       (UBaseType_t)15,                   //线程优先级 0-24 数值越大优先级越高
       (TaskHandle_t *)&ThreadWiFi,       //线程句柄
@@ -379,7 +381,7 @@ void TaskAPPStart()
   status = xTaskCreatePinnedToCore(
       (TaskFunction_t)ThreadSensorEntry,   //Sensor线程入口
       (const char *const) "Thread_Sensor", //线程名称
-      (const uint32_t)2048 * 2,                //线程栈
+      (const uint32_t)2048 * 2,            //线程栈
       (void *const)NULL,                   //Sensor线程入口参数
       (UBaseType_t)10,                     //线程优先级 0-24 数值越大优先级越高
       (TaskHandle_t *)&ThreadSensor,       //线程句柄
@@ -486,7 +488,7 @@ void ThreadMqttEntry(void *pvParameters)
     if (!mqttClient.connected() || !WiFi.isConnected())
     {
       /*检验MQTT和WIFI是否断连,断连芯片重启重新配网*/
-      
+
       u8g2.clearBuffer();
       Serial.println("WIFI or MQTT has been disconnected");
       OLEDprint(20, 32, "WIFI or MQTT");
@@ -523,10 +525,14 @@ void ThreadSensorEntry(void *pvParameters)
     if (analogRead(34) > 2000)
     {
       digitalWrite(Bee, LOW);
+      Serial.println("BEE!!!!");
+      Serial.println(digitalRead(13));
     }
     else
     {
       digitalWrite(Bee, HIGH);
+      Serial.println("NO BEE!!!!");
+      Serial.println(digitalRead(13));
     }
     String payload; //存放MQTT发送消息的变量
     doc.clear();    //清空原有存放JSON数据和释放内存
@@ -634,9 +640,9 @@ void ThreadWeatherEntry(void *pvParameters)
     doc["temperature"] = (int)bme.readTemperature();
     doc["humidity"] = (int)bme.readHumidity();
     doc["airpressure"] = bme.readPressure() / 100.0;
+    doc["carbon"] = analogRead(34);
     String params;
     serializeJson(doc, params);
-
     httpResponseCode = espHttp.POST(params);
 
     if (httpResponseCode > 0)
@@ -647,9 +653,9 @@ void ThreadWeatherEntry(void *pvParameters)
       Serial.println("***********POST*********");
     }
     espHttp.end();
-    
+
     // Serial.println("===================== POST =====================");
-    vTaskDelay(pdMS_TO_TICKS(3000));
+    vTaskDelay(pdMS_TO_TICKS(1000));
   }
 }
 
@@ -928,7 +934,7 @@ void webmain(AsyncWebServerRequest *request)
     content += "}</script></html>";
 
     WiFi.scanDelete(); //清除扫描数据
-    //Serial.println(content);
+    Serial.println(content);
     /*Web服务器返回状态码200,以及配置WiFi页面*/
     request->send(200, "text/html", content);
   }
@@ -1325,9 +1331,6 @@ void SensorInit()
 {
 
   int count = 0;
-  /*蜂鸣器*/
-  pinMode(Bee, OUTPUT);
-  digitalWrite(Bee,HIGH);
   /*bme280初始化*/
   while (!bme.begin())
   {
