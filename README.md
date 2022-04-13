@@ -12,7 +12,8 @@
 * 杜邦线
 * 面包板
 ## 硬件程序框架
-![硬件程序框架](./image/framework.png)
+![电路原理图](./image/circuit.jpg)
+![系统框架图](./image/framework.png)
 ## 主要功能
 * WIFI配网：ESP32可以作为服务器提供配网页面实现配网
 * 天气API获取：ESP32发送HTTP请求，使用ArduinoJSON处理数据
@@ -20,4 +21,7 @@
 * Blinker客户端：主要通过点灯科技接入第三方语音，实现小米小爱同学联动
 * 环境数据读取：通过BME280、MQ-2获取温湿度等数据
 * OLED显示功能: 在OLED屏幕上面显示相关的信息
-
+## 全部资料
+链接：https://pan.xunlei.com/s/VN-YXMz8jSMzedzqGzchDagcA1
+提取码：6rx8
+复制这段内容后打开手机迅雷App，查看更方便
